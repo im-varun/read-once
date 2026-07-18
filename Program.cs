@@ -1,4 +1,6 @@
 using StackExchange.Redis;
+using ReadOnce.Services;
+using ReadOnce.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -10,6 +12,7 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
     options.AbortOnConnectFail = false;
     return ConnectionMultiplexer.Connect(options);
 });
+builder.Services.AddScoped<ISecretService, SecretService>();
 
 var app = builder.Build();
 
@@ -45,6 +48,12 @@ app.MapGet("/health/redis", async (IConnectionMultiplexer redis) =>
             title: "Redis is not available"
         );
     }
+});
+
+app.MapPost("/secrets", async (CreateSecretRequest request, ISecretService secretService) =>
+{
+    var response = await secretService.CreateSecretAsync(request);
+    return Results.Created($"/secrets/{response.Id}", response);
 });
 
 app.Run();
