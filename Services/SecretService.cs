@@ -13,7 +13,17 @@ public class SecretService : ISecretService
     }
 
     public async Task<CreateSecretResponse> CreateSecretAsync(CreateSecretRequest request)
-    {
+    {   
+        if (string.IsNullOrWhiteSpace(request.Content))
+        {
+            throw new ArgumentException("Content cannot be empty.");
+        }
+
+        if (request.TtlSeconds <= 0)
+        {
+            throw new ArgumentException("TTL must be greater than zero.");
+        }
+
         var db = _redis.GetDatabase();
 
         var id = Guid.NewGuid().ToString();

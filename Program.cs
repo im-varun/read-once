@@ -1,6 +1,6 @@
 using StackExchange.Redis;
 using ReadOnce.Services;
-using ReadOnce.Models;
+using ReadOnce.Endpoints;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -50,19 +50,6 @@ app.MapGet("/health/redis", async (IConnectionMultiplexer redis) =>
     }
 });
 
-app.MapPost("/secrets", async (CreateSecretRequest request, ISecretService secretService) =>
-{
-    var response = await secretService.CreateSecretAsync(request);
-    return Results.Created($"/secrets/{response.Id}", response);
-});
-
-app.MapGet("/secrets/{id}", async (string id, ISecretService secretService) =>
-{
-    var content = await secretService.GetAndDeleteSecretAsync(id);
-
-    return content is null
-        ? Results.NotFound(new { message = "Secret not found, expired or has already been retrieved." })
-        : Results.Ok(new { content });
-});
+app.MapSecretEndpoints();
 
 app.Run();
