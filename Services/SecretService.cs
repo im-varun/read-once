@@ -14,9 +14,9 @@ public class SecretService : ISecretService
 
     public async Task<CreateSecretResponse> CreateSecretAsync(CreateSecretRequest request)
     {
-        var id = Guid.NewGuid().ToString();
         var db = _redis.GetDatabase();
 
+        var id = Guid.NewGuid().ToString();
         var key = $"secret:{id}";
         var ttl = TimeSpan.FromSeconds(request.TtlSeconds);
 
@@ -27,5 +27,16 @@ public class SecretService : ISecretService
         }
 
         return new CreateSecretResponse(id);
+    }
+
+    public async Task<string?> GetAndDeleteSecretAsync(string id)
+    {
+        var db = _redis.GetDatabase();
+        
+        var key = $"secret:{id}";
+
+        var value = await db.StringGetDeleteAsync(key);
+
+        return value.IsNullOrEmpty ? null : value.ToString();
     }
 }

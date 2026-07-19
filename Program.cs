@@ -56,4 +56,13 @@ app.MapPost("/secrets", async (CreateSecretRequest request, ISecretService secre
     return Results.Created($"/secrets/{response.Id}", response);
 });
 
+app.MapGet("/secrets/{id}", async (string id, ISecretService secretService) =>
+{
+    var content = await secretService.GetAndDeleteSecretAsync(id);
+
+    return content is null
+        ? Results.NotFound(new { message = "Secret not found, expired or has already been retrieved." })
+        : Results.Ok(new { content });
+});
+
 app.Run();
