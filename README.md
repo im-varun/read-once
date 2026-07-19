@@ -6,18 +6,20 @@ Read Once is a self-destructing secret sharing service that lets people send sen
 
 - Create a secret with a TTL
 - Read it exactly once - atomic delete-on-read
+- JWT-based authentication
+- Per-user secret history
 
 ## Design Choices
 
 - GUID-based ids for unguessability (122 bits of randomness)
 - Redis GETDEL for atomic read-and-delete, no application-level locking needed
+- Secret metadata stores an `ownerId` and uses the same TTL as the secret. The persistent `user:{userId}:secrets` set may contain ids whose metadata has expired, so history reads defensively skip stale set entries.
 
 ## Limitations
 
-- Security depends entirely on the id/link being kept secret between sender and recipient - this system has no way to distinguish an authorized recipient from anyone else who obtains the id
+- Reading a secret remains intentionally unauthenticated: anyone with its id/link can redeem it. The link is the system's actual security boundary.
 - No persistence beyond Redis's own TTL - if Redis restarts/loses data before a secret is read, it's gone
 - No rate limiting - nothing currently prevents abuse (spamming secret creation)
-- No authentication/user accounts
 
 ## Running the Project Locally
 
@@ -51,17 +53,33 @@ The default `appsettings.json` already points to `localhost:6379`, so no changes
 }
 ```
 
-### 4. Run the app
+### 4. Configure the JWT signing key
+Keep the signing key out of `appsettings.json`. Store a key of at least 32 bytes in .NET User Secrets:
+```bash
+dotnet user-secrets set "Jwt:SigningKey" "replace-with-a-long-random-secret-at-least-32-bytes"
+```
+
+### 5. Run the app
 ```bash
 dotnet run
 ```
 The API will start on the port shown in the console output (e.g., `http://localhost:5092`).
 
-### 5. Try it out
+### 6. Try it out
 ```bash
+# Register and log in
+curl -i -X POST http://localhost:5092/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"username": "alice", "password": "correct horse battery staple"}'
+
+curl -i -X POST http://localhost:5092/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username": "alice", "password": "correct horse battery staple"}'
+
 # Create a secret
 curl -i -X POST http://localhost:5092/secrets \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer {token}" \
   -d '{"content": "the launch codes are 1234", "ttlSeconds": 60}'
 
 # Read it once (replace {id} with the id returned above)
@@ -73,8 +91,48 @@ curl -i http://localhost:5092/secrets/{id}
 
 ## Documentation
 
+### `POST /auth/register`
+Creates a Redis-backed user account. Authentication is not required.
+
+**Request body**
+```json
+{
+  "username": "string, required, non-empty",
+  "password": "string, required, non-empty"
+}
+```
+
+**Responses**
+
+| Status | Meaning |
+|---|---|
+| `201 Created` | Account created; returns `{ "message": "User registered successfully." }` |
+| `400 Bad Request` | Username/password was empty, or the username is already taken; returns a Problem Details response |
+
+---
+
+### `POST /auth/login`
+Validates credentials and creates a JWT. Authentication is not required.
+
+**Request body**
+```json
+{
+  "username": "string, required",
+  "password": "string, required"
+}
+```
+
+**Responses**
+
+| Status | Meaning |
+|---|---|
+| `200 OK` | Credentials accepted; returns `{ "token": "JWT string" }` |
+| `401 Unauthorized` | Credentials are invalid; returns a Problem Details response |
+
+---
+
 ### `POST /secrets`
-Creates a new secret with a time-to-live.
+Creates a new secret with a time-to-live and associates it with the authenticated user. Requires `Authorization: Bearer {token}`.
 
 **Request body**
 ```json
@@ -90,11 +148,12 @@ Creates a new secret with a time-to-live.
 |---|---|
 | `201 Created` | Secret created successfully; returns `{ "id": "string" }` and a `Location` header |
 | `400 Bad Request` | `content` was empty, or `ttlSeconds` was zero/negative |
+| `401 Unauthorized` | A valid bearer token was not supplied |
 
 ---
 
 ### `GET /secrets/{id}`
-Retrieves and permanently deletes a secret in one atomic operation. Can only ever succeed once per secret.
+Retrieves and permanently deletes a secret in one atomic operation. Can only ever succeed once per secret. Authentication is deliberately not required.
 
 **Path parameter**
 
@@ -111,8 +170,32 @@ Retrieves and permanently deletes a secret in one atomic operation. Can only eve
 
 ---
 
+### `GET /users/me/secrets`
+Returns the authenticated user's unexpired secret history. Requires `Authorization: Bearer {token}`. Stale ids whose metadata has expired are omitted.
+
+**Response body**
+```json
+[
+  {
+    "id": "string",
+    "createdAt": "ISO-8601 timestamp",
+    "expiresAt": "ISO-8601 timestamp",
+    "isRead": "boolean"
+  }
+]
+```
+
+**Responses**
+
+| Status | Meaning |
+|---|---|
+| `200 OK` | Returns the caller's `SecretSummary[]`; the array may be empty |
+| `401 Unauthorized` | A valid bearer token was not supplied |
+
+---
+
 ### `GET /health/redis`
-Health check confirming connectivity to the Redis backend.
+Health check confirming connectivity to the Redis backend. Authentication is not required.
 
 **Responses**
 
